@@ -12,59 +12,57 @@ ui <- fluidPage(
     tags$script(src="hand_handler.js"),
     
     tags$style(HTML("
-      body { background-color: #000; margin: 0; padding: 0; overflow: hidden; }
+      /* 1. 移除页面边距，隐藏滚动条，黑色背景 */
+      body { 
+        background-color: #000; 
+        margin: 0; 
+        padding: 0; 
+        overflow: hidden; 
+      }
+      
+      /* 2. 主容器铺满全屏 */
       #main_container {
         position: relative;
         width: 100vw;
         height: 100vh;
-        display: flex;
-        justify-content: center;
-        align-items: center;
       }
-      /* 视频层：隐藏或作为背景 */
+      
+      /* 3. 视频层 (背景) */
       #my_camera {
         position: absolute;
-        width: 640px;
-        height: 480px;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        /* 强制拉伸填满屏幕，确保手势坐标和全屏画布对齐 */
+        object-fit: fill; 
         transform: scaleX(-1); /* 镜像 */
-        opacity: 0.3; /* 让视频暗一点，突出粒子 */
+        opacity: 0.2; /* 只有一点点淡淡的影子，突出粒子 */
         z-index: 1;
       }
-      /* 绘图层：全屏覆盖 */
+      
+      /* 4. 绘图层 (前景) */
       #output_canvas {
         position: absolute;
-        width: 640px;
-        height: 480px;
-        z-index: 2;
-        transform: scaleX(-1); /* 画布也要镜像，否则和视频对不上 */
-      }
-      .title-overlay {
-        position: absolute;
-        top: 20px;
-        z-index: 10;
-        color: white;
-        text-align: center;
+        top: 0;
+        left: 0;
         width: 100%;
-        font-family: sans-serif;
-        text-shadow: 0 0 10px #00FFFF;
-        pointer-events: none;
+        height: 100%;
+        z-index: 2;
+        transform: scaleX(-1); /* 画布也要镜像 */
       }
     "))
   ),
   
   div(id="main_container",
-      div(class="title-overlay",
-          h2("R + JS 极速粒子引擎 (60 FPS)"),
-          h4("⚡ 所有的计算都在浏览器本地完成，零延迟 ⚡")
-      ),
+      # 只有视频和画布，没有任何文字
       tags$video(id = "my_camera", autoplay = TRUE, muted = TRUE),
       tags$canvas(id = "output_canvas")
   )
 )
 
 server <- function(input, output, session) {
-  # R 现在什么都不用做，甚至不需要监听信号
-  # 所有的魔法都在 hand_handler.js 里
+  # 空空如也，R 只负责提供这个空页面
 }
 
 shinyApp(ui, server)
