@@ -1,107 +1,185 @@
-// www/hand_handler.js (v2.0 增强版)
+// www/hand_handler.js - 极速版
+
+// === 全局配置 ===
+const PARTICLE_COUNT = 400; // 粒子数量，JS 性能好，可以多一点
+const CANVAS_WIDTH = 640;
+const CANVAS_HEIGHT = 480;
+
+// 全局状态
+let isFist = false; // 当前是否握拳
+let targetX = CANVAS_WIDTH / 2; // 粒子聚合的目标点 X
+let targetY = CANVAS_HEIGHT / 2; // 粒子聚合的目标点 Y
+
+// === 粒子类定义 ===
+class Particle {
+    constructor() {
+        // 随机初始位置
+        this.x = Math.random() * CANVAS_WIDTH;
+        this.y = Math.random() * CANVAS_HEIGHT;
+        // 速度
+        this.vx = (Math.random() - 0.5) * 4;
+        this.vy = (Math.random() - 0.5) * 4;
+        // 颜色 (H: 0-360, S: 100%, L: 50%)
+        this.hue = Math.random() * 60 + 180; // 初始青蓝色系
+        this.size = Math.random() * 3 + 1;
+    }
+
+    update() {
+        // --- 物理引擎核心 ---
+        
+        if (isFist) {
+            // === 握拳模式：极速聚合 ===
+            const dx = targetX - this.x;
+            const dy = targetY - this.y;
+            
+            // 强力吸引
+            this.vx += dx * 0.08; 
+            this.vy += dy * 0.08;
+            
+            // 强阻尼 (防止在中心无限弹跳)
+            this.vx *= 0.85;
+            this.vy *= 0.85;
+
+            // 变色：变成火红色/橙色
+            this.hue = this.hue * 0.9 + 10 * 0.1; // 渐变到 10 (红色)
+
+        } else {
+            // === 张手模式：随机游走 + 鼠标排斥 ===
+            
+            // 随机扰动
+            this.vx += (Math.random() - 0.5) * 0.5;
+            this.vy += (Math.random() - 0.5) * 0.5;
+            
+            // 稍微把它们推离中心 (斥力)
+            const dx = this.x - targetX;
+            const dy = this.y - targetY;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if(dist < 100) {
+                this.vx += dx * 0.05;
+                this.vy += dy * 0.05;
+            }
+
+            // 弱阻尼 (保持漂浮感)
+            this.vx *= 0.98;
+            this.vy *= 0.98;
+
+            // 变色：回到青蓝色
+            this.hue = this.hue * 0.95 + 200 * 0.05; 
+        }
+
+        // 更新位置
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // 边界反弹
+        if (this.x < 0 || this.x > CANVAS_WIDTH) this.vx *= -0.9;
+        if (this.y < 0 || this.y > CANVAS_HEIGHT) this.vy *= -0.9;
+        
+        // 简单的边界限制
+        if (this.x < 0) this.x = 0;
+        if (this.x > CANVAS_WIDTH) this.x = CANVAS_WIDTH;
+        if (this.y < 0) this.y = 0;
+        if (this.y > CANVAS_HEIGHT) this.y = CANVAS_HEIGHT;
+    }
+
+    draw(ctx) {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = `hsl(${this.hue}, 100%, 60%)`;
+        ctx.fill();
+    }
+}
+
+// 初始化粒子数组
+const particles = [];
+for (let i = 0; i < PARTICLE_COUNT; i++) {
+    particles.push(new Particle());
+}
+
 
 $(document).ready(function() {
-  const videoElement = document.getElementById('my_camera');
-  // 新增：获取用于绘制骨骼和框的 canvas 元素
-  const canvasElement = document.getElementById('hand_canvas');
-  const canvasCtx = canvasElement.getContext('2d');
+    const videoElement = document.getElementById('my_camera');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
 
-  if (!videoElement || !canvasElement) {
-    console.error("缺少必要的视频或Canvas元素");
-    return;
-  }
+    // 设置 Canvas 尺寸
+    canvasElement.width = CANVAS_WIDTH;
+    canvasElement.height = CANVAS_HEIGHT;
 
-  let lastState = "open";
-  
-  // --- 辅助函数：判断单个手指是否伸展 ---
-  // 原理：比较指尖(tip)到手腕(0)的距离 vs 指根关节(mcp)到手腕的距离
-  // 如果指尖距离明显大于指根距离，认为是伸展的
-  function isFingerExtended(landmarks, tipIdx, mcpIdx) {
-      const wrist = landmarks[0];
-      const tip = landmarks[tipIdx];
-      const mcp = landmarks[mcpIdx];
-      
-      const tipDist = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
-      const mcpDist = Math.hypot(mcp.x - wrist.x, mcp.y - wrist.y);
-      
-      // 阈值系数 1.2，表示指尖距离要是关节距离的 1.2 倍以上才算伸展
-      return tipDist > (mcpDist * 1.2);
-  }
-
-  function onResults(results) {
-    // 1. 准备绘图：设置 canvas 尺寸并清空上一帧内容
-    canvasElement.width = videoElement.videoWidth;
-    canvasElement.height = videoElement.videoHeight;
-    canvasCtx.save();
-    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-    // 镜像翻转 canvas，与视频保持一致
-    canvasCtx.translate(canvasElement.width, 0);
-    canvasCtx.scale(-1, 1);
-
-    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-      const landmarks = results.multiHandLandmarks[0];
-
-      // --- A. 绘制视觉反馈 (骨骼和框) ---
-      // 使用 MediaPipe 内置工具绘制连接线和关键点
-      drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS,
-                     {color: '#00FF00', lineWidth: 2});
-      drawLandmarks(canvasCtx, landmarks,
-                    {color: '#FF0000', lineWidth: 1, radius: 3});
-
-      // --- B. 核心算法：计算伸展手指数量 ---
-      // 指尖点索引: 食指(8), 中指(12), 无名指(16), 小指(20)
-      // 指根点索引: 食指(5), 中指(9),  无名指(13), 小指(17)
-      // 拇指判断逻辑较复杂，这里简化，只看这四根手指
-      let extendedCount = 0;
-      if (isFingerExtended(landmarks, 8, 5)) extendedCount++;
-      if (isFingerExtended(landmarks, 12, 9)) extendedCount++;
-      if (isFingerExtended(landmarks, 16, 13)) extendedCount++;
-      if (isFingerExtended(landmarks, 20, 17)) extendedCount++;
-      
-      console.log("伸展手指数量:", extendedCount);
-
-      // --- C. 状态判定 ---
-      let currentState = lastState; // 默认保持上一个状态
-      // 如果伸展手指少于等于 1 个，认为是握拳
-      if (extendedCount <= 1) {
-        currentState = "fist";
-      } 
-      // 如果伸展手指大于等于 3 个，认为是张开
-      // 留一个中间缓冲区 (2个手指时保持不变)，防止状态频繁跳动
-      else if (extendedCount >= 3) {
-        currentState = "open";
-      }
-
-      // --- D. 发送信号给 R ---
-      if (currentState !== lastState) {
-        lastState = currentState;
-        Shiny.setInputValue("gesture_input", currentState + "_" + Math.random());
-      }
+    // === MediaPipe 辅助函数 ===
+    function isFingerExtended(landmarks, tipIdx, mcpIdx) {
+        const wrist = landmarks[0];
+        const tip = landmarks[tipIdx];
+        const mcp = landmarks[mcpIdx];
+        const tipDist = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+        const mcpDist = Math.hypot(mcp.x - wrist.x, mcp.y - wrist.y);
+        return tipDist > (mcpDist * 1.2);
     }
-    canvasCtx.restore();
-  }
 
-  // 初始化 MediaPipe Hands
-  const hands = new Hands({locateFile: (file) => {
-    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-  }});
+    // === 主循环：这里是 MediaPipe 的回调 ===
+    // 注意：MediaPipe 可能会比较慢(20-30fps)，但这不影响我们的动画(60fps)
+    function onResults(results) {
+        // 我们只在这里更新“状态”，不在这里画图
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const landmarks = results.multiHandLandmarks[0];
 
-  hands.setOptions({
-    maxNumHands: 1,
-    modelComplexity: 1,
-    minDetectionConfidence: 0.6, //稍微提高置信度阈值
-    minTrackingConfidence: 0.6
-  });
+            // 1. 更新目标点为手掌中心 (点9: 中指根部)
+            // MediaPipe 坐标是 0-1，需要乘画布宽高
+            targetX = landmarks[9].x * CANVAS_WIDTH;
+            targetY = landmarks[9].y * CANVAS_HEIGHT;
 
-  hands.onResults(onResults);
+            // 2. 判断手势
+            let extendedCount = 0;
+            if (isFingerExtended(landmarks, 8, 5)) extendedCount++;
+            if (isFingerExtended(landmarks, 12, 9)) extendedCount++;
+            if (isFingerExtended(landmarks, 16, 13)) extendedCount++;
+            if (isFingerExtended(landmarks, 20, 17)) extendedCount++;
 
-  const camera = new Camera(videoElement, {
-    onFrame: async () => {
-      await hands.send({image: videoElement});
-    },
-    width: 640,
-    height: 480
-  });
-  
-  camera.start();
+            if (extendedCount <= 1) isFist = true;
+            else if (extendedCount >= 3) isFist = false;
+            
+            // 可选：在这里也可以画骨骼，但为了纯粹的粒子效果，我们先不画骨骼
+        }
+    }
+
+    // === 动画循环 (Game Loop) ===
+    // 这个 requestAnimationFrame 保证了尽可能高的帧率 (通常 60FPS)
+    function animate() {
+        // 1. 清空画布 (半透明清空可以做出拖尾效果！)
+        canvasCtx.fillStyle = 'rgba(0, 0, 0, 0.2)'; // 0.2 的透明度产生拖尾
+        canvasCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+        // 2. 更新并绘制每一个粒子
+        for (let p of particles) {
+            p.update();
+            p.draw(canvasCtx);
+        }
+
+        // 循环调用
+        requestAnimationFrame(animate);
+    }
+
+    // === 启动 MediaPipe ===
+    const hands = new Hands({locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+    }});
+    hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+    });
+    hands.onResults(onResults);
+
+    const camera = new Camera(videoElement, {
+        onFrame: async () => {
+            await hands.send({image: videoElement});
+        },
+        width: 640,
+        height: 480
+    });
+    camera.start();
+
+    // 启动动画循环
+    animate();
 });
